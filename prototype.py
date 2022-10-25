@@ -21,7 +21,7 @@ def flag_to_run():
 st.sidebar.button('3. Run', help='', on_click=flag_to_run)
 
 
-print("doc_id---------", doc_id,st.session_state.run)
+print("doc_id-------", doc_id,st.session_state.run)
 # get the doc
 
 # fetch template id  : /documents/{did}/templates
