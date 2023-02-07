@@ -1,0 +1,85 @@
+trigger:
+- master
+- dev
+
+pr: none
+
+variables:
+
+  ${{ if eq(variables['Build.SourceBranchName'], 'master') }}:
+    azureSubscription: 'DSL_PROD'
+  ${{ else }}:
+    azureSubscription: 'DSL_NONPROD'
+
+  ${{ if eq(variables['Build.SourceBranchName'], 'master') }}:
+    webAppName: 'information-extraction-tool-prod'
+  ${{ else }}:
+    webAppName: 'information-extraction-tool-nonprod'
+
+  environmentName: 'APP_SERVICES'
+
+  isPR: $[eq(variables['Build.Reason'], 'PullRequest')]
+
+pool:
+  name: 'DSL'
+  demands:
+    - subscription -equals $(azureSubscription)
+
+stages:
+- stage: Build
+  displayName: Build stage
+  jobs:
+    - job: Build
+      displayName: Build
+
+      steps:
+        - script: |
+            python -m venv antenv
+            source antenv/bin/activate
+            python -m pip install --upgrade pip
+            pip install setup
+            pip install -r requirements.txt
+          displayName: 'Install requirements'
+        - script: |
+            echo Deleting .env
+            rm -rf .env
+          displayName: 'Remove .env before zip'
+    - job: Package
+      displayName: Package
+      dependsOn: Build
+      condition: and(succeeded(),in(variables['Build.SourceBranchName'], 'master', 'dev'))
+
+      steps:
+        - task: ArchiveFiles@2
+          displayName: 'Archive files'
+          inputs:
+            rootFolderOrFile: '$(Build.SourcesDirectory)'
+            includeRootFolder: false
+            archiveType: zip
+            archiveFile: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
+            replaceExistingArchive: true
+
+        - upload: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
+          artifact: drop
+
+- stage: Deploy
+  displayName: Deploy stage
+  dependsOn: Build
+  condition: and(succeeded(),in(variables['Build.SourceBranchName'], 'master', 'dev'))
+  jobs:
+    - deployment: Deploy
+      displayName: Deploy
+      environment: $(environmentName)
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+
+              - task: AzureWebApp@1
+                displayName: 'Azure App Service Deploy: $(webAppName)'
+                inputs:
+                  azureSubscription: $(azureSubscription)
+                  appType: 'webAppLinux'
+                  appName: $(webAppName)
+                  package: '$(Pipeline.Workspace)/drop/$(Build.BuildId).zip'
+                  runtimeStack: 'PYTHON|3.9'
